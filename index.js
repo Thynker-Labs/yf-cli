@@ -2,11 +2,31 @@
 
 const { program } = require('commander');
 const Table = require('cli-table3');
-const YahooFinance = require('yahoo-finance2').default;
-const yahooFinance = new YahooFinance();
+const https = require('https');
 const fs = require('fs');
 
-// Parse tickers from string (comma-separated or one per line)
+// Simple fetch wrapper
+function fetch(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { 
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+// Parse tickers from string
 function parseTickers(input) {
   if (!input) return [];
   return input
@@ -15,41 +35,73 @@ function parseTickers(input) {
     .filter(t => t.length > 0);
 }
 
-// Format number with commas
+// Format helpers
 function formatNum(n) {
   if (n === null || n === undefined) return 'N/A';
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Format percentage
 function formatPct(n) {
   if (n === null || n === undefined) return 'N/A';
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 }
 
-// Format date for display
 function formatDate(date) {
   return new Date(date).toISOString().split('T')[0];
 }
 
-// Get quote data
+// Get quote data - using chart endpoint for quote too
 async function getQuote(ticker) {
   try {
-    const quote = await yahooFinance.quote(ticker);
+    // Use chart endpoint with 1d range - gives us current price info
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d`;
+    const data = await fetch(url);
+    
+    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+      return { symbol: ticker, error: 'Ticker not found' };
+    }
+    
+    const result = data.chart.result[0];
+    const meta = result.meta;
+    const quote = result.indicators?.quote?.[0];
+    
+    if (!meta) {
+      return { symbol: ticker, error: 'No data available' };
+    }
+    
+    // Get previous close from 5d chart
+    const prevUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=5d&interval=1d`;
+    const prevData = await fetch(prevUrl);
+    let prevClose = null;
+    if (prevData.chart?.result?.[0]?.indicators?.quote?.[0]?.close) {
+      const closes = prevData.chart.result[0].indicators.quote[0].close;
+      // Find the second to last close that's not null
+      for (let i = closes.length - 2; i >= 0; i--) {
+        if (closes[i] !== null) {
+          prevClose = closes[i];
+          break;
+        }
+      }
+    }
+    
+    const currentPrice = meta.regularMarketPrice || meta.previousClose;
+    const change = prevClose ? currentPrice - prevClose : null;
+    const changePct = prevClose ? ((currentPrice - prevClose) / prevClose) * 100 : null;
+    
     return {
-      symbol: quote.symbol,
-      name: quote.shortName || quote.longName || ticker,
-      price: quote.regularMarketPrice,
-      change: quote.regularMarketChange,
-      changePct: quote.regularMarketChangePercent,
-      open: quote.regularMarketOpen,
-      high: quote.regularMarketDayHigh,
-      low: quote.regularMarketDayLow,
-      volume: quote.regularMarketVolume,
-      marketCap: quote.marketCap,
-      peRatio: quote.trailingPE,
-      previousClose: quote.regularMarketPreviousClose,
-      exchange: quote.exchange,
+      symbol: meta.symbol,
+      name: meta.shortName || meta.longName || meta.symbol,
+      price: currentPrice,
+      change: change,
+      changePct: changePct,
+      open: meta.chartPreviousClose || meta.previousClose,
+      high: meta.regularMarketDayHigh || meta.dayHigh,
+      low: meta.regularMarketDayLow || meta.dayLow,
+      volume: meta.regularMarketVolume,
+      marketCap: null, // Not available in chart endpoint
+      peRatio: null,
+      previousClose: prevClose || meta.previousClose,
+      exchange: meta.exchangeName,
     };
   } catch (err) {
     return { symbol: ticker, error: err.message };
@@ -59,70 +111,73 @@ async function getQuote(ticker) {
 // Get historical data
 async function getHistorical(ticker, period) {
   try {
-    let periodObj;
-    
-    // Check if it's a date range (DDMMYYYY-DDMMYYYY)
+    let url;
     const dateRangeMatch = period.match(/^(\d{8})-(\d{8})$/);
+    
     if (dateRangeMatch) {
       const parseDate = (d) => {
         const day = d.slice(0, 2);
         const month = d.slice(2, 4);
         const year = d.slice(4, 8);
-        return new Date(`${year}-${month}-${day}`);
+        return new Date(`${year}-${month}-${day}`).getTime() / 1000;
       };
-      periodObj = {
-        period1: parseDate(dateRangeMatch[1]),
-        period2: parseDate(dateRangeMatch[2]),
-      };
+      const period1 = parseDate(dateRangeMatch[1]);
+      const period2 = parseDate(dateRangeMatch[2]);
+      url = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${period1}&period2=${period2}&interval=1d`;
     } else {
-      // Convert period strings to date ranges
-      const now = new Date();
-      let startDate = new Date(now);
-      
       const periodMap = {
-        '1d': 1,
-        '5d': 5,
-        '1mo': 30,
-        '3mo': 90,
-        '6mo': 180,
-        '1y': 365,
-        '2y': 730,
-        '5y': 1825,
-        '10y': 3650,
+        '1d': '1d', '5d': '5d', '1mo': '1mo', '3mo': '3mo',
+        '6mo': '6mo', '1y': '1y', '2y': '2y', '5y': '5y',
+        '10y': '10y', 'ytd': 'ytd', 'max': 'max',
       };
       
-      if (period === 'ytd') {
-        startDate = new Date(now.getFullYear(), 0, 1);
-      } else if (period === 'max') {
-        startDate = new Date(1900, 0, 1);
-      } else if (periodMap[period]) {
-        startDate.setDate(startDate.getDate() - periodMap[period]);
-      } else {
+      if (!periodMap[period]) {
         throw new Error(`Invalid period. Use: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max, or DDMMYYYY-DDMMYYYY`);
       }
       
-      periodObj = {
-        period1: startDate,
-        period2: now,
-      };
+      url = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=${periodMap[period]}&interval=1d`;
     }
     
-    const history = await yahooFinance.historical(ticker, periodObj);
-    return history.map(h => ({
-      date: formatDate(h.date),
-      open: h.open,
-      high: h.high,
-      low: h.low,
-      close: h.close,
-      volume: h.volume,
-      adjClose: h.adjClose,
-    }));
+    const data = await fetch(url);
+    
+    if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+      return { symbol: ticker, error: 'No data found' };
+    }
+    
+    return parseChartData(data, ticker);
   } catch (err) {
     return { symbol: ticker, error: err.message };
   }
 }
 
-// Display quote as table
+function parseChartData(data, ticker) {
+  if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
+    return { symbol: ticker, error: 'No data found' };
+  }
+  
+  const result = data.chart.result[0];
+  const timestamps = result.timestamp;
+  const indicators = result.indicators;
+  
+  if (!timestamps || !indicators || !indicators.quote || !indicators.quote[0]) {
+    return { symbol: ticker, error: 'No data available' };
+  }
+  
+  const quote = indicators.quote[0];
+  const adjClose = indicators.adjclose?.[0]?.adjclose;
+  
+  return timestamps.map((ts, i) => ({
+    date: formatDate(new Date(ts * 1000)),
+    open: quote.open[i],
+    high: quote.high[i],
+    low: quote.low[i],
+    close: quote.close[i],
+    adjClose: adjClose ? adjClose[i] : quote.close[i],
+    volume: quote.volume[i],
+  })).filter(h => h.close !== null);
+}
+
+// Display functions
 function displayQuoteTable(data) {
   if (data.error) {
     console.log(`Error: ${data.error}`);
@@ -145,7 +200,6 @@ function displayQuoteTable(data) {
 
   console.log(table.toString());
 
-  // Additional details
   const details = new Table({ chars: { top: '', 'top-mid': '', 'top-left': '', 'top-right': '', bottom: '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '', left: '', 'left-mid': '', mid: '', 'mid-mid': '', right: '', 'right-mid': '', dash: '', 'dash-mid': '', 'dash-left': '', 'dash-right': '', space: '' } });
   
   details.push(
@@ -153,15 +207,12 @@ function displayQuoteTable(data) {
     ['Prev Close', data.previousClose ? formatNum(data.previousClose) : 'N/A'],
     ['Day High', data.high ? formatNum(data.high) : 'N/A'],
     ['Day Low', data.low ? formatNum(data.low) : 'N/A'],
-    ['Market Cap', data.marketCap ? formatNum(data.marketCap) : 'N/A'],
-    ['P/E Ratio', data.peRatio ? formatNum(data.peRatio) : 'N/A'],
     ['Exchange', data.exchange || 'N/A'],
   );
   
   console.log(details.toString());
 }
 
-// Display historical as table
 function displayHistoricalTable(data, symbol, showAll) {
   if (data.error) {
     console.log(`Error for ${symbol}: ${data.error}`);
@@ -196,7 +247,7 @@ function displayHistoricalTable(data, symbol, showAll) {
   console.log(table.toString());
 }
 
-// Main command
+// Main CLI
 program
   .name('yf')
   .description('Yahoo Finance CLI - Get stock quotes and historical data')
@@ -221,7 +272,7 @@ program
 program
   .command('csv')
   .description('Read tickers from a CSV file')
-  .argument('<file>', 'Path to CSV file (one ticker per line or comma-separated)')
+  .argument('<file>', 'Path to CSV file')
   .option('-j, --json', 'Output as JSON')
   .action(async (file, options) => {
     try {
