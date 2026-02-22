@@ -1,5 +1,5 @@
 {
-  "name": "yf-cli",
+  "name": "@thynker-labs/yf-cli",
   "version": "1.0.0",
   "description": "Yahoo Finance CLI - Get stock quotes and historical data",
   "main": "index.js",
@@ -13,7 +13,8 @@
     "yahoo-finance",
     "stocks",
     "cli",
-    "finance"
+    "finance",
+    "openclaw"
   ],
   "author": "Sid Wahi",
   "license": "MIT",
