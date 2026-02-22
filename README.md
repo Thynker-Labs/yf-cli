@@ -4,10 +4,26 @@ Yahoo Finance CLI - Get stock quotes and historical data from the command line.
 
 ## Installation
 
+### Option 1: Install Script (Recommended)
+
 ```bash
 git clone https://github.com/thynker-labs/yf-cli.git
 cd yf-cli
-npm install
+./install.sh
+```
+
+The install script will:
+- Check that Node.js and npm are installed
+- Install the package globally
+- Link the CLI command
+- Verify the installation
+
+### Option 2: Manual Install
+
+```bash
+git clone https://github.com/thynker-labs/yf-cli.git
+cd yf-cli
+npm install -g .
 ```
 
 Or link globally:
