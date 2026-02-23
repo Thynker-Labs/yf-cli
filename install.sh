@@ -92,13 +92,30 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3: Install the yf-cli package globally
+# STEP 3: Install dependencies (required before global install when linking)
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${YELLOW}➤ STEP 3: Installing yf-cli globally...${NC}"
-echo -e "${BLUE}  Running: npm install -g ${NC}"
+echo -e "${YELLOW}➤ STEP 3: Installing dependencies...${NC}"
+echo -e "${BLUE}  Running: npm install${NC}"
 echo ""
 
 cd "$(dirname "$0")"
+
+if npm install; then
+    echo ""
+    echo -e "${GREEN}✓ Dependencies installed${NC}"
+else
+    echo -e "${RED}✗ Failed to install dependencies!${NC}"
+    exit 1
+fi
+
+echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4: Install the yf-cli package globally
+# ─────────────────────────────────────────────────────────────────────────────
+echo -e "${YELLOW}➤ STEP 4: Installing yf-cli globally...${NC}"
+echo -e "${BLUE}  Running: npm install -g .${NC}"
+echo ""
 
 if npm install -g .; then
     echo ""
@@ -111,7 +128,7 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 4: Link the CLI
+# STEP 5: Link the CLI
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}➤ STEP 4: Linking CLI command...${NC}"
 echo -e "${BLUE}  Running: npm link${NC}"
@@ -127,7 +144,7 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5: Verify installation
+# STEP 6: Verify installation
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}➤ STEP 5: Verifying installation...${NC}"
 

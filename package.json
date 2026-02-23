@@ -6,6 +6,12 @@
   "bin": {
     "yf": "./index.js"
   },
+  "files": [
+    "index.js"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "scripts": {
     "test": "node index.js --help"
   },
