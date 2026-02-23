@@ -1,6 +1,6 @@
 {
   "name": "@thynker-labs/yf-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Yahoo Finance CLI - Get stock quotes and historical data",
   "main": "index.js",
   "bin": {
